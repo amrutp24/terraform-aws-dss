@@ -1,0 +1,6 @@
+# Anything that ends up executing on a Linux host must keep LF, whatever the
+# contributor's core.autocrlf says. Terraform installs registry modules by
+# cloning, so the consumer's git config decides what lands on disk.
+*.tftpl text eol=lf
+*.sh    text eol=lf
+*.tf    text eol=lf
