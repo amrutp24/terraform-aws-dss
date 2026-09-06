@@ -56,35 +56,33 @@ The `dataiku` provider needs an API key, and a brand-new DSS has no way to
 produce one without a browser. With `create_api_key` left on, the bootstrap runs
 `dsscli api-key-create` and writes the result to `api_key_path`, mode 0600.
 
-Moving it off the instance is the part this module deliberately does not decide
-for you:
+Moving it off the instance is the part this module deliberately leaves to you.
 
-- **Secrets Manager** is cleanest. Extend the instance's role and push the key
-  there, then read it back with `aws_secretsmanager_secret_version`. Nothing
-  sensitive passes through Terraform state.
-- **Over SSH**, with an `external` data source or a `remote-exec`.
-- **By hand, once.** Set `create_api_key = false` and create a global API key
-  under Administration → Security after DSS is up.
+Secrets Manager is the cleanest of these: extend the instance's role, push the
+key there, and read it back with `aws_secretsmanager_secret_version`, so nothing
+sensitive passes through Terraform state. Fetching the file over SSH with an
+`external` data source works too.
 
-## What this module does not do
+Or skip it entirely. Set `create_api_key = false` and create a global API key
+under Administration → Security once DSS is up.
 
-Worth knowing before you rely on it.
+## Limits
 
-**The data directory is on the root volume.** That keeps the module small, and
-means replacing the instance loses every project. For anything you care about,
-attach an EBS volume, mount it at `data_dir`, and it survives a rebuild.
+The data directory sits on the root volume, which keeps the module small and
+means replacing the instance loses every project. Attach an EBS volume and mount
+it at `data_dir` if you want it to survive a rebuild.
 
-**There is no load balancer, TLS, or DNS.** DSS is reached directly on its port
-over plain HTTP. Put it behind an ALB with an ACM certificate before anyone
-types a password into it.
+There is no load balancer, TLS or DNS. DSS answers directly on its port over
+plain HTTP, so put it behind an ALB with an ACM certificate before anyone types
+a password into it.
 
-**One instance, no automatic recovery.** No autoscaling group, no health check
-replacing a broken node. DSS is stateful and does not cluster like this, so
-recovery means restoring the data directory.
+Nothing replaces a broken node either: no autoscaling group, no health check.
+DSS is stateful and does not cluster this way, so recovery means restoring the
+data directory from a backup you took yourself.
 
-**Sizing costs money.** DSS drops into a low-memory mode below roughly 16 GB and
-says so in its logs, so the default is `m5.xlarge`. That runs up a bill while it
-exists. `terraform destroy` when you are finished.
+It also costs money. DSS drops into a low-memory mode below roughly 16 GB and
+says so in its logs, which is why the default is `m5.xlarge` — that bills for as
+long as it exists. Destroy it when you are done.
 
 ## Licensing DSS
 
