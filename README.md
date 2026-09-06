@@ -96,6 +96,9 @@ The `dataiku` provider needs an API key, and a brand-new DSS has no way to
 produce one without a browser. With `create_api_key` left on, the bootstrap runs
 `dsscli api-key-create` and writes the result to `api_key_path`, mode 0600.
 
+It writes an array of one object, not a bare object, so anything reading it
+has to index in: `[{"id": ..., "key": ..., "label": "terraform"}]`.
+
 Moving it off the instance is the part this module deliberately leaves to you.
 Secrets Manager is the cleanest option: extend the instance's role, push the key
 there from user-data, and read it back with `aws_secretsmanager_secret_version`,
