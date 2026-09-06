@@ -63,7 +63,7 @@ variable "subnet_id" {
 }
 
 variable "assign_public_ip" {
-  description = "Give the instance a public address. False needs a route of your own -- VPN, Direct Connect, a bastion."
+  description = "Give the instance a public address. False needs a route of your own: VPN, Direct Connect, or a bastion."
   type        = bool
   default     = true
 }
