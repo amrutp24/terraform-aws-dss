@@ -137,13 +137,29 @@ it exists. Destroy it when you are done.
 
 ## Licensing DSS
 
-The `dataiku` provider talks to the DSS public REST API, and the Free Edition
-does not licence that on its own. The Enterprise trial bundled with it does, for
-as long as the trial lasts. Pass a licence at install time with `license_json`,
-or register the instance through its web interface on first visit.
+The `dataiku` provider talks to the DSS public REST API.
 
-`license_json` reaches instance user-data and Terraform state, so supply it from
-a secret store rather than a file in your repository.
+Whether a given instance serves it depends on the version and the licence, so
+check rather than assume. A stock DSS 15 Community Edition installed by this
+module answered the API with `license_json` unset, and projects, groups, users,
+connections and scenarios were all created through it. An older `dataiku/dss` container, by
+contrast, refused with `DSS API is not available with your Free Edition
+license`.
+
+The check that matters is whether the API answers at all:
+
+```bash
+curl -su "$DATAIKU_API_KEY:" "$(terraform output -raw dss_url)/public/api/admin/general-settings/" -o /dev/null -w '%{http_code}'; echo
+```
+
+`200` means the provider will work. `401` is a bad key. A licence error names
+itself in the body, and then you need a licence with API access.
+
+Pass a licence at install time with `license_json` if you have one, or register
+the instance through its web interface on first visit.
+
+`license_json` reaches instance user-data and Terraform state, so supply it from a
+secret store rather than a file in your repository.
 
 ## Security defaults
 
