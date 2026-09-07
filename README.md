@@ -131,6 +131,12 @@ Nothing replaces a broken node either: no autoscaling group, no health check.
 DSS is stateful and does not cluster this way, so recovery means restoring the
 data directory from a backup you took yourself.
 
+Code environments need `python_interpreter` set. The image is Ubuntu 24.04,
+which ships Python 3.12 only, while DSS 15 defaults new Python environments to
+`python3.9`. Left unset the build fails with `python3.9: command not found`,
+and DSS reports the environment as created anyway. Pass `PYTHON312` to
+`dataiku_code_env`.
+
 It also costs money. DSS drops into a low-memory mode below roughly 16 GB and
 says so in its logs, so the default is `m5.xlarge`, which bills for as long as
 it exists. Destroy it when you are done.
