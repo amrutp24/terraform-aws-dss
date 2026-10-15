@@ -1,0 +1,53 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  # The module declares required_version = ">= 1.5" and nothing checked that
+  # claim. Running the floor next to the newest release is what turns it from
+  # an assertion into something tested: a module that quietly needs 1.9 fails
+  # here rather than on a consumer's pinned CLI.
+  validate:
+    name: Validate (Terraform ${{ matrix.terraform }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        terraform:
+          - '1.5.*'
+          - 'latest'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ matrix.terraform }}
+          terraform_wrapper: false
+
+      # Recursive, so the example is held to the same standard as the module.
+      - name: Check formatting
+        run: terraform fmt -check -recursive
+
+      # -backend=false means no state and no credentials. init still reaches
+      # the registry for the aws provider, which is why this needs
+      # network but nothing else.
+      - name: Validate the module
+        run: |
+          terraform init -backend=false
+          terraform validate
+
+      # examples/basic sources the module as ../../, so validating it type
+      # checks the module against a real caller. A variable renamed here and
+      # not there is the failure this catches, and the module's own validate
+      # cannot see it.
+      - name: Validate the example
+        working-directory: examples/basic
+        run: |
+          terraform init -backend=false
+          terraform validate
