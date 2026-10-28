@@ -51,3 +51,23 @@ jobs:
         run: |
           terraform init -backend=false
           terraform validate
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    # terraform test arrived in 1.6, so the suite cannot run on the 1.5 floor
+    # the module supports. Consumers on 1.5 are covered by the validate job
+    # above; the assertions themselves need something newer.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 'latest'
+          terraform_wrapper: false
+
+      - run: terraform init -backend=false
+
+      # The provider is mocked in the test files, so this needs no
+      # credentials, reaches nothing and creates nothing.
+      - run: terraform test
+        timeout-minutes: 10
