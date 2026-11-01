@@ -42,7 +42,7 @@ output "instance_profile_name" {
     has to pick up the new credentials, and until it does, send-command
     answers "Instances not in a valid state for account".
   EOT
-  value       = var.enable_ssm ? aws_iam_instance_profile.ssm[0].name : null
+  value       = local.needs_instance_profile ? aws_iam_instance_profile.ssm[0].name : null
 }
 
 output "api_key_path" {

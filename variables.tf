@@ -105,6 +105,28 @@ variable "tags" {
   default     = {}
 }
 
+variable "license_ssm_parameter" {
+  description = <<-EOT
+    Name of an SSM Parameter Store parameter holding a DSS licence, which the
+    instance reads for itself at boot.
+
+    Prefer this over license_json. license_json is rendered into the boot
+    script, so it reaches Terraform state and instance metadata, and anybody
+    with ec2:DescribeInstanceAttribute can read it back. This puts only the
+    parameter name in both places, and grants the instance ssm:GetParameter on
+    that one parameter.
+
+    Store it as a SecureString. With the default aws/ssm key that is all the
+    setup required; a customer-managed key needs kms:Decrypt on the key added
+    to the role as well, which this module does not do for you.
+
+    Setting this creates an instance profile even when enable_ssm is off,
+    because the instance cannot read a parameter without one.
+  EOT
+  type        = string
+  default     = null
+}
+
 variable "enable_ssm" {
   description = <<-EOT
     Attach an IAM role that lets you reach the instance through AWS Systems

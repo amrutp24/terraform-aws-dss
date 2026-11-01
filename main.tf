@@ -47,12 +47,29 @@ data "aws_subnets" "selected" {
 
 module "bootstrap" {
   source  = "amrutp24/dss-bootstrap/null"
-  version = "~> 0.1"
+  version = "~> 0.2"
 
   dss_version  = var.dss_version
   dss_port     = var.dss_port
   data_dir     = var.data_dir
   license_json = var.license_json
+
+  # Read on the instance, so no licence material reaches state or metadata.
+  # The instance profile below grants this and nothing else.
+  license_fetch_command = var.license_ssm_parameter == null ? "" : join(" ", [
+    "aws ssm get-parameter",
+    "--name ${var.license_ssm_parameter}",
+    "--with-decryption",
+    "--region ${data.aws_region.current.region}",
+    "--query Parameter.Value --output text",
+  ])
+}
+
+data "aws_region" "current" {}
+
+locals {
+  # Either feature needs the instance to have an identity of its own.
+  needs_instance_profile = var.enable_ssm || var.license_ssm_parameter != null
 }
 
 resource "aws_security_group" "dss" {
@@ -104,7 +121,7 @@ resource "aws_instance" "dss" {
 
   vpc_security_group_ids      = [aws_security_group.dss.id]
   associate_public_ip_address = var.assign_public_ip
-  iam_instance_profile        = var.enable_ssm ? aws_iam_instance_profile.ssm[0].name : null
+  iam_instance_profile        = local.needs_instance_profile ? aws_iam_instance_profile.ssm[0].name : null
 
   # The data directory holds every project and all configuration, so it is
   # what you back up. It lives on the root volume here for simplicity; see the
@@ -130,11 +147,11 @@ resource "aws_instance" "dss" {
 # Session Manager access
 # ---------------------------------------------------------------------------
 
-# Everything here is created only when enable_ssm is on, so a module left at
-# its defaults makes no IAM at all.
+# Everything here is created only when enable_ssm is on or a licence
+# parameter was named, so a module left at its defaults makes no IAM at all.
 
 data "aws_iam_policy_document" "ssm_assume" {
-  count = var.enable_ssm ? 1 : 0
+  count = local.needs_instance_profile ? 1 : 0
 
   statement {
     actions = ["sts:AssumeRole"]
@@ -147,10 +164,10 @@ data "aws_iam_policy_document" "ssm_assume" {
 }
 
 resource "aws_iam_role" "ssm" {
-  count = var.enable_ssm ? 1 : 0
+  count = local.needs_instance_profile ? 1 : 0
 
   name_prefix        = "${var.name}-ssm-"
-  description        = "Lets Session Manager reach the Dataiku DSS instance"
+  description        = "Identity for the Dataiku DSS instance: Session Manager, and reading its licence"
   assume_role_policy = data.aws_iam_policy_document.ssm_assume[0].json
   tags               = var.tags
 }
@@ -166,9 +183,36 @@ resource "aws_iam_role_policy_attachment" "ssm" {
 }
 
 resource "aws_iam_instance_profile" "ssm" {
-  count = var.enable_ssm ? 1 : 0
+  count = local.needs_instance_profile ? 1 : 0
 
   name_prefix = "${var.name}-ssm-"
   role        = aws_iam_role.ssm[0].name
   tags        = var.tags
 }
+
+# ---------------------------------------------------------------------------
+# Reading the licence
+# ---------------------------------------------------------------------------
+
+# Scoped to the one parameter named, rather than to the path or to every
+# parameter in the account. A licence is not worth broader access than that.
+data "aws_iam_policy_document" "license_read" {
+  count = var.license_ssm_parameter != null ? 1 : 0
+
+  statement {
+    actions = ["ssm:GetParameter"]
+    resources = [
+      "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/${trimprefix(var.license_ssm_parameter, "/")}",
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "license_read" {
+  count = var.license_ssm_parameter != null ? 1 : 0
+
+  name_prefix = "${var.name}-license-"
+  role        = aws_iam_role.ssm[0].id
+  policy      = data.aws_iam_policy_document.license_read[0].json
+}
+
+data "aws_caller_identity" "current" {}

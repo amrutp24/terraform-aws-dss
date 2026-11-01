@@ -150,6 +150,68 @@ run "no_iam_is_created_by_default" {
   # above is the same fact, reached from the side that is knowable.
 }
 
+# Reading the licence needs an identity, so naming a parameter has to create
+# one even with Session Manager off. Without this the instance would boot with
+# no profile and the fetch would fail with a credentials error at install time.
+run "a_licence_parameter_creates_an_instance_profile_on_its_own" {
+  command = plan
+
+  variables {
+    license_ssm_parameter = "/dss/license"
+  }
+
+  assert {
+    condition     = length(aws_iam_role.ssm) == 1 && length(aws_iam_instance_profile.ssm) == 1
+    error_message = "Naming a licence parameter must create a role and an instance profile."
+  }
+
+  assert {
+    condition     = length(aws_iam_role_policy.license_read) == 1
+    error_message = "The role should carry a policy letting it read the licence."
+  }
+
+  # Session Manager was not asked for, so its policy must stay off. The two
+  # features share a role and nothing else.
+  assert {
+    condition     = length(aws_iam_role_policy_attachment.ssm) == 0
+    error_message = "A licence parameter must not quietly grant Session Manager access."
+  }
+}
+
+# The licence must not travel through Terraform. If it is in the boot script
+# it is in state and in instance metadata, which is the whole thing this
+# avoids, so the script should carry the command and not a licence.
+run "the_licence_is_fetched_on_the_instance_rather_than_rendered" {
+  command = plan
+
+  variables {
+    license_ssm_parameter = "/dss/license"
+  }
+
+  assert {
+    condition     = strcontains(module.bootstrap.install_script, "aws ssm get-parameter --name /dss/license")
+    error_message = "The boot script should fetch the licence from the named parameter."
+  }
+
+  assert {
+    condition     = !strcontains(module.bootstrap.install_script, "writing licence")
+    error_message = "No licence content should be rendered into the boot script."
+  }
+}
+
+run "no_licence_parameter_means_no_licence_policy" {
+  command = plan
+
+  variables {
+    enable_ssm = true
+  }
+
+  assert {
+    condition     = length(aws_iam_role_policy.license_read) == 0
+    error_message = "Session Manager alone must not grant any parameter read."
+  }
+}
+
 run "ssm_attaches_a_profile_to_the_instance" {
   command = plan
 
