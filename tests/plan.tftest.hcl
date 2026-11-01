@@ -12,6 +12,15 @@ mock_provider "aws" {
       ids = ["subnet-0123456789abcdef0"]
     }
   }
+
+  # The aws provider parses assume_role_policy rather than passing it through,
+  # so a generated mock string is rejected as "not a JSON object". Give it a
+  # policy that parses; its contents are never used.
+  mock_data "aws_iam_policy_document" {
+    defaults = {
+      json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+    }
+  }
 }
 
 variables {
@@ -120,5 +129,41 @@ run "the_instance_clears_dataikus_memory_floor" {
   assert {
     condition     = aws_instance.dss.instance_type == "m5.xlarge"
     error_message = "The default instance type should clear Dataiku's 16 GB floor."
+  }
+}
+
+# Without this, and without a key pair, nothing can reach the host. That
+# matters more than it sounds: the bootstrap writes an admin API key to disk
+# at boot, and the dataiku provider needs it, so an unreachable host makes the
+# second half of the workflow impossible.
+run "no_iam_is_created_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(aws_iam_role.ssm) == 0 && length(aws_iam_instance_profile.ssm) == 0
+    error_message = "A module left at its defaults must create no IAM."
+  }
+
+  # Not asserted: that the instance carries no profile. aws_instance's
+  # iam_instance_profile is computed, so at plan time it is unknown and the
+  # comparison cannot be evaluated. The absence of the role and the profile
+  # above is the same fact, reached from the side that is knowable.
+}
+
+run "ssm_attaches_a_profile_to_the_instance" {
+  command = plan
+
+  variables {
+    enable_ssm = true
+  }
+
+  assert {
+    condition     = length(aws_iam_role.ssm) == 1
+    error_message = "enable_ssm should create exactly one role."
+  }
+
+  assert {
+    condition     = one(aws_iam_role_policy_attachment.ssm).policy_arn == "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+    error_message = "The role should carry the policy AWS publishes for Session Manager, and not a hand-rolled one."
   }
 }

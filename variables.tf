@@ -104,3 +104,26 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "enable_ssm" {
+  description = <<-EOT
+    Attach an IAM role that lets you reach the instance through AWS Systems
+    Manager Session Manager.
+
+    Off by default, because it is the one thing this module creates outside
+    the VPC and somebody should choose it. Turn it on and you get a shell
+    without a key pair and without opening port 22:
+
+      aws ssm start-session --target <instance-id>
+
+    This is also the only way to read the API key the bootstrap writes when
+    create_api_key is on. Without either this or key_name, that file exists on
+    the host and nothing can reach it, which makes the second half of the
+    workflow, pointing the dataiku provider at the instance, impossible.
+
+    Ubuntu 24.04 ships the SSM agent, so nothing is installed for this; only
+    the instance profile is missing.
+  EOT
+  type        = bool
+  default     = false
+}

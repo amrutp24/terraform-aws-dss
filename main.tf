@@ -104,6 +104,7 @@ resource "aws_instance" "dss" {
 
   vpc_security_group_ids      = [aws_security_group.dss.id]
   associate_public_ip_address = var.assign_public_ip
+  iam_instance_profile        = var.enable_ssm ? aws_iam_instance_profile.ssm[0].name : null
 
   # The data directory holds every project and all configuration, so it is
   # what you back up. It lives on the root volume here for simplicity; see the
@@ -123,4 +124,51 @@ resource "aws_instance" "dss" {
   }
 
   tags = merge(var.tags, { Name = var.name })
+}
+
+# ---------------------------------------------------------------------------
+# Session Manager access
+# ---------------------------------------------------------------------------
+
+# Everything here is created only when enable_ssm is on, so a module left at
+# its defaults makes no IAM at all.
+
+data "aws_iam_policy_document" "ssm_assume" {
+  count = var.enable_ssm ? 1 : 0
+
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "ssm" {
+  count = var.enable_ssm ? 1 : 0
+
+  name_prefix        = "${var.name}-ssm-"
+  description        = "Lets Session Manager reach the Dataiku DSS instance"
+  assume_role_policy = data.aws_iam_policy_document.ssm_assume[0].json
+  tags               = var.tags
+}
+
+# AmazonSSMManagedInstanceCore is the policy AWS publishes for exactly this,
+# and is narrower than it looks: it permits the agent's own calls and nothing
+# about other services.
+resource "aws_iam_role_policy_attachment" "ssm" {
+  count = var.enable_ssm ? 1 : 0
+
+  role       = aws_iam_role.ssm[0].name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "ssm" {
+  count = var.enable_ssm ? 1 : 0
+
+  name_prefix = "${var.name}-ssm-"
+  role        = aws_iam_role.ssm[0].name
+  tags        = var.tags
 }
