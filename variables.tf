@@ -104,3 +104,61 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "license_ssm_parameter" {
+  description = <<-EOT
+    Name of an SSM Parameter Store parameter holding a DSS licence, which the
+    instance reads for itself at boot.
+
+    Prefer this over license_json. license_json is rendered into the boot
+    script, so it reaches Terraform state and instance metadata, and anybody
+    with ec2:DescribeInstanceAttribute can read it back. This puts only the
+    parameter name in both places, and grants the instance ssm:GetParameter on
+    that one parameter.
+
+    Store it as a SecureString. With the default aws/ssm key that is all the
+    setup required; a customer-managed key needs kms:Decrypt on the key added
+    to the role as well, which this module does not do for you.
+
+    Setting this creates an instance profile even when enable_ssm is off,
+    because the instance cannot read a parameter without one.
+  EOT
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.license_ssm_parameter == null || can(regex("^[A-Za-z0-9_./-]+$", var.license_ssm_parameter))
+    error_message = "license_ssm_parameter must be a parameter name: letters, digits, underscore, dot, slash and dash only. It is interpolated into a shell command that runs on the instance."
+  }
+}
+
+variable "enable_ssm" {
+  description = <<-EOT
+    Attach an IAM role that lets you reach the instance through AWS Systems
+    Manager Session Manager.
+
+    Off by default, because it is the one thing this module creates outside
+    the VPC and somebody should choose it. Turn it on and you get a shell
+    without a key pair and without opening port 22:
+
+      aws ssm start-session --target <instance-id>
+
+    This is also the only way to read the API key the bootstrap writes when
+    create_api_key is on. Without either this or key_name, that file exists on
+    the host and nothing can reach it, which makes the second half of the
+    workflow, pointing the dataiku provider at the instance, impossible.
+
+    Worth knowing before you turn it on: the policy AWS publishes for this,
+    AmazonSSMManagedInstanceCore, also grants ssm:GetParameter and
+    ssm:GetParameters on every resource. So this does not only open a shell,
+    it lets anything running on the instance read any SSM parameter in the
+    account. Read off the live policy document rather than assumed. If that
+    matters where you are deploying, attach your own narrower policy instead
+    of setting this.
+
+    Ubuntu 24.04 ships the SSM agent, so nothing is installed for this; only
+    the instance profile is missing.
+  EOT
+  type        = bool
+  default     = false
+}

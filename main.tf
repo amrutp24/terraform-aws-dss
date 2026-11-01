@@ -47,12 +47,42 @@ data "aws_subnets" "selected" {
 
 module "bootstrap" {
   source  = "amrutp24/dss-bootstrap/null"
-  version = "~> 0.1"
+  version = "~> 0.3"
 
   dss_version  = var.dss_version
   dss_port     = var.dss_port
   data_dir     = var.data_dir
   license_json = var.license_json
+
+  # Read on the instance, so no licence material reaches state or metadata.
+  # The instance profile below grants this and nothing else.
+  #
+  # python3 and boto3 rather than the AWS CLI, which this AMI cannot provide:
+  # Ubuntu 24.04 has no awscli package at all, in any component, so an
+  # apt install of it fails with "no installation candidate". Checked on a
+  # running instance rather than assumed. The CLI's own installer would work
+  # but means a 60 MB download at boot, and an architecture to get right.
+  #
+  # boto3 arrives as python3-boto3, a dependency of sosreport, which is part
+  # of the standard Ubuntu cloud image the AMI lookup above selects. It is
+  # also in apt if it ever goes missing, which awscli is not.
+  #
+  # One command, not a list: the bootstrap redirects this command's stdout
+  # into the licence file and its stderr into a log, and a list would
+  # redirect only its last part. The region and parameter arrive as argv so
+  # the Python needs no quoting of its own.
+  license_fetch_command = var.license_ssm_parameter == null ? "" : join(" ", [
+    "python3 -c 'import boto3,sys;print(boto3.client(\"ssm\",region_name=sys.argv[1]).get_parameter(Name=sys.argv[2],WithDecryption=True)[\"Parameter\"][\"Value\"])'",
+    data.aws_region.current.region,
+    var.license_ssm_parameter,
+  ])
+}
+
+data "aws_region" "current" {}
+
+locals {
+  # Either feature needs the instance to have an identity of its own.
+  needs_instance_profile = var.enable_ssm || var.license_ssm_parameter != null
 }
 
 resource "aws_security_group" "dss" {
@@ -104,6 +134,7 @@ resource "aws_instance" "dss" {
 
   vpc_security_group_ids      = [aws_security_group.dss.id]
   associate_public_ip_address = var.assign_public_ip
+  iam_instance_profile        = local.needs_instance_profile ? aws_iam_instance_profile.ssm[0].name : null
 
   # The data directory holds every project and all configuration, so it is
   # what you back up. It lives on the root volume here for simplicity; see the
@@ -124,3 +155,85 @@ resource "aws_instance" "dss" {
 
   tags = merge(var.tags, { Name = var.name })
 }
+
+# ---------------------------------------------------------------------------
+# Session Manager access
+# ---------------------------------------------------------------------------
+
+# Everything here is created only when enable_ssm is on or a licence
+# parameter was named, so a module left at its defaults makes no IAM at all.
+
+data "aws_iam_policy_document" "ssm_assume" {
+  count = local.needs_instance_profile ? 1 : 0
+
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "ssm" {
+  count = local.needs_instance_profile ? 1 : 0
+
+  name_prefix        = "${var.name}-ssm-"
+  description        = "Identity for the Dataiku DSS instance: Session Manager, and reading its licence"
+  assume_role_policy = data.aws_iam_policy_document.ssm_assume[0].json
+  tags               = var.tags
+}
+
+# AmazonSSMManagedInstanceCore is the policy AWS publishes for exactly this,
+# so it is the right thing to attach rather than a hand-rolled copy. It is
+# wider than its name suggests, though, and this comment used to claim the
+# opposite: alongside the agent's own calls it grants ssm:GetParameter and
+# ssm:GetParameters on Resource "*", so an instance with enable_ssm on can
+# read every parameter in the account. Read off the live policy document, not
+# assumed. enable_ssm says so too.
+#
+# That is also why the licence policy below is still worth having: it is what
+# authorises the read when enable_ssm is off, and it keeps the licence working
+# independently of what AWS chooses to put in a managed policy.
+resource "aws_iam_role_policy_attachment" "ssm" {
+  count = var.enable_ssm ? 1 : 0
+
+  role       = aws_iam_role.ssm[0].name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "ssm" {
+  count = local.needs_instance_profile ? 1 : 0
+
+  name_prefix = "${var.name}-ssm-"
+  role        = aws_iam_role.ssm[0].name
+  tags        = var.tags
+}
+
+# ---------------------------------------------------------------------------
+# Reading the licence
+# ---------------------------------------------------------------------------
+
+# Scoped to the one parameter named, rather than to the path or to every
+# parameter in the account. A licence is not worth broader access than that.
+data "aws_iam_policy_document" "license_read" {
+  count = var.license_ssm_parameter != null ? 1 : 0
+
+  statement {
+    actions = ["ssm:GetParameter"]
+    resources = [
+      "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/${trimprefix(var.license_ssm_parameter, "/")}",
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "license_read" {
+  count = var.license_ssm_parameter != null ? 1 : 0
+
+  name_prefix = "${var.name}-license-"
+  role        = aws_iam_role.ssm[0].id
+  policy      = data.aws_iam_policy_document.license_read[0].json
+}
+
+data "aws_caller_identity" "current" {}
