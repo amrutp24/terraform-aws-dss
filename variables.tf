@@ -125,6 +125,11 @@ variable "license_ssm_parameter" {
   EOT
   type        = string
   default     = null
+
+  validation {
+    condition     = var.license_ssm_parameter == null || can(regex("^[A-Za-z0-9_./-]+$", var.license_ssm_parameter))
+    error_message = "license_ssm_parameter must be a parameter name: letters, digits, underscore, dot, slash and dash only. It is interpolated into a shell command that runs on the instance."
+  }
 }
 
 variable "enable_ssm" {
@@ -142,6 +147,14 @@ variable "enable_ssm" {
     create_api_key is on. Without either this or key_name, that file exists on
     the host and nothing can reach it, which makes the second half of the
     workflow, pointing the dataiku provider at the instance, impossible.
+
+    Worth knowing before you turn it on: the policy AWS publishes for this,
+    AmazonSSMManagedInstanceCore, also grants ssm:GetParameter and
+    ssm:GetParameters on every resource. So this does not only open a shell,
+    it lets anything running on the instance read any SSM parameter in the
+    account. Read off the live policy document rather than assumed. If that
+    matters where you are deploying, attach your own narrower policy instead
+    of setting this.
 
     Ubuntu 24.04 ships the SSM agent, so nothing is installed for this; only
     the instance profile is missing.

@@ -189,13 +189,38 @@ run "the_licence_is_fetched_on_the_instance_rather_than_rendered" {
   }
 
   assert {
-    condition     = strcontains(module.bootstrap.install_script, "aws ssm get-parameter --name /dss/license")
-    error_message = "The boot script should fetch the licence from the named parameter."
+    condition     = strcontains(module.bootstrap.install_script, "get_parameter(Name=sys.argv[2],WithDecryption=True)")
+    error_message = "The boot script should read the licence from Parameter Store, decrypted."
+  }
+
+  assert {
+    condition     = strcontains(module.bootstrap.install_script, "/dss/license")
+    error_message = "The boot script should name the parameter it was given."
   }
 
   assert {
     condition     = !strcontains(module.bootstrap.install_script, "writing licence")
     error_message = "No licence content should be rendered into the boot script."
+  }
+
+  # Not the AWS CLI: Ubuntu 24.04 has no awscli package in any component, so
+  # a fetch that shells out to it fails and DSS comes up unlicensed. Checked
+  # on a running instance.
+  assert {
+    condition     = !strcontains(module.bootstrap.install_script, "aws ssm get-parameter")
+    error_message = "The fetch must not depend on the AWS CLI, which this AMI cannot install."
+  }
+
+  assert {
+    condition     = strcontains(module.bootstrap.install_script, "import boto3")
+    error_message = "The fetch should read the parameter with boto3, which the Ubuntu image carries."
+  }
+
+  # The parameter and region arrive as argv, so the Python body needs no
+  # quoting and a parameter name cannot terminate a string literal.
+  assert {
+    condition     = strcontains(module.bootstrap.install_script, "sys.argv[2]")
+    error_message = "The parameter name should be passed as an argument rather than interpolated into the Python."
   }
 }
 

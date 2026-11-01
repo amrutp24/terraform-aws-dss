@@ -56,12 +56,25 @@ module "bootstrap" {
 
   # Read on the instance, so no licence material reaches state or metadata.
   # The instance profile below grants this and nothing else.
+  #
+  # python3 and boto3 rather than the AWS CLI, which this AMI cannot provide:
+  # Ubuntu 24.04 has no awscli package at all, in any component, so an
+  # apt install of it fails with "no installation candidate". Checked on a
+  # running instance rather than assumed. The CLI's own installer would work
+  # but means a 60 MB download at boot, and an architecture to get right.
+  #
+  # boto3 arrives as python3-boto3, a dependency of sosreport, which is part
+  # of the standard Ubuntu cloud image the AMI lookup above selects. It is
+  # also in apt if it ever goes missing, which awscli is not.
+  #
+  # One command, not a list: the bootstrap redirects this command's stdout
+  # into the licence file and its stderr into a log, and a list would
+  # redirect only its last part. The region and parameter arrive as argv so
+  # the Python needs no quoting of its own.
   license_fetch_command = var.license_ssm_parameter == null ? "" : join(" ", [
-    "aws ssm get-parameter",
-    "--name ${var.license_ssm_parameter}",
-    "--with-decryption",
-    "--region ${data.aws_region.current.region}",
-    "--query Parameter.Value --output text",
+    "python3 -c 'import boto3,sys;print(boto3.client(\"ssm\",region_name=sys.argv[1]).get_parameter(Name=sys.argv[2],WithDecryption=True)[\"Parameter\"][\"Value\"])'",
+    data.aws_region.current.region,
+    var.license_ssm_parameter,
   ])
 }
 
@@ -173,8 +186,16 @@ resource "aws_iam_role" "ssm" {
 }
 
 # AmazonSSMManagedInstanceCore is the policy AWS publishes for exactly this,
-# and is narrower than it looks: it permits the agent's own calls and nothing
-# about other services.
+# so it is the right thing to attach rather than a hand-rolled copy. It is
+# wider than its name suggests, though, and this comment used to claim the
+# opposite: alongside the agent's own calls it grants ssm:GetParameter and
+# ssm:GetParameters on Resource "*", so an instance with enable_ssm on can
+# read every parameter in the account. Read off the live policy document, not
+# assumed. enable_ssm says so too.
+#
+# That is also why the licence policy below is still worth having: it is what
+# authorises the read when enable_ssm is off, and it keeps the licence working
+# independently of what AWS chooses to put in a managed policy.
 resource "aws_iam_role_policy_attachment" "ssm" {
   count = var.enable_ssm ? 1 : 0
 
