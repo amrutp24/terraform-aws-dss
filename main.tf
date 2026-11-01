@@ -47,7 +47,7 @@ data "aws_subnets" "selected" {
 
 module "bootstrap" {
   source  = "amrutp24/dss-bootstrap/null"
-  version = "~> 0.2"
+  version = "~> 0.3"
 
   dss_version  = var.dss_version
   dss_port     = var.dss_port
