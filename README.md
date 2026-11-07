@@ -108,6 +108,22 @@ with an `external` data source works too.
 Or skip it. Set `create_api_key = false` and create a global API key under
 Administration → Security once DSS is up.
 
+With `enable_ssm = true` there is also `scripts/fetch-key.sh`, which does the
+two SSM calls and checks that the key authenticates. It is a convenience, not
+a substitute for the above: the key still lands on your machine rather than in
+a secret store.
+
+## Licensing
+
+A fresh instance asks whoever opens it first to register Free Edition, and
+licenses only the `NONE` user profile until they do, which is enough to stop
+the `dataiku` provider creating a usable user. `license_ssm_parameter` makes
+that a one-time job: register once, keep the licence in Parameter Store, and
+every instance after that reads it at boot.
+
+See [docs/licensing.md](docs/licensing.md) for both ways of doing it, what
+each costs you, and why this module prefers the parameter over `license_json`.
+
 ## Outputs
 
 | Output | Use |
