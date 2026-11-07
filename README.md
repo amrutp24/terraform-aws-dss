@@ -20,10 +20,19 @@ provider "aws" {
 
 module "dss" {
   source  = "amrutp24/dss/aws"
-  version = "~> 0.1"
+  version = "~> 0.2"
 
   allowed_cidr_blocks = ["203.0.113.0/24"] # replace: your office or VPN range
-  license_json        = var.dss_license_json
+
+  # A shell on the instance without a key pair, and the only way to read the
+  # admin API key the bootstrap writes.
+  enable_ssm = true
+
+  # Where the licence lives. The instance reads it at boot, so it is licensed
+  # before DSS finishes starting and nobody has to register it in a browser.
+  # See docs/licensing.md. license_json also works and is simpler, but it
+  # reaches Terraform state and instance metadata.
+  license_ssm_parameter = "/dss/license"
 }
 
 output "dss_url" {
@@ -53,7 +62,7 @@ ssh ubuntu@$(terraform output -raw public_ip) 'sudo tail -f /var/log/cloud-init-
 
 Every line the bootstrap writes is prefixed `[dss-bootstrap]`, and the last one
 is `done`. Without SSH the same output is in the console log, under
-Actions → Monitor and troubleshoot → Get system log.
+Actions -> Monitor and troubleshoot -> Get system log.
 
 To block until it is up:
 
@@ -106,23 +115,12 @@ so nothing sensitive passes through Terraform state. Fetching the file over SSH
 with an `external` data source works too.
 
 Or skip it. Set `create_api_key = false` and create a global API key under
-Administration → Security once DSS is up.
+Administration -> Security once DSS is up.
 
 With `enable_ssm = true` there is also `scripts/fetch-key.sh`, which does the
 two SSM calls and checks that the key authenticates. It is a convenience, not
 a substitute for the above: the key still lands on your machine rather than in
 a secret store.
-
-## Licensing
-
-A fresh instance asks whoever opens it first to register Free Edition, and
-licenses only the `NONE` user profile until they do, which is enough to stop
-the `dataiku` provider creating a usable user. `license_ssm_parameter` makes
-that a one-time job: register once, keep the licence in Parameter Store, and
-every instance after that reads it at boot.
-
-See [docs/licensing.md](docs/licensing.md) for both ways of doing it, what
-each costs you, and why this module prefers the parameter over `license_json`.
 
 ## Outputs
 
@@ -132,6 +130,9 @@ each costs you, and why this module prefers the parameter over `license_json`.
 | `public_ip`, `private_ip` | Instance addresses. |
 | `instance_id` | SSM sessions, snapshots, anything referencing the instance. |
 | `data_dir` | Path holding every project. This is what to back up. |
+| `session_command` | Ready-made `aws ssm start-session` line. Null unless `enable_ssm`. |
+| `api_key_path` | Where on the instance the bootstrap wrote the admin API key. |
+| `instance_profile_name` | The profile attached to the instance, if one was created. |
 
 ## Limits
 
@@ -157,31 +158,33 @@ It also costs money. DSS drops into a low-memory mode below roughly 16 GB and
 says so in its logs, so the default is `m5.xlarge`, which bills for as long as
 it exists. Destroy it when you are done.
 
-## Licensing DSS
+## Licensing
 
-The `dataiku` provider talks to the DSS public REST API.
+A fresh instance asks whoever opens it first to register Free Edition, and
+until somebody does it licenses only the `NONE` user profile, which is enough
+to stop the `dataiku` provider creating a usable user.
 
-Whether a given instance serves it depends on the version and the licence, so
-check rather than assume. A stock DSS 15 Community Edition installed by this
-module answered the API with `license_json` unset, and projects, groups, users,
-connections and scenarios were all created through it. An older `dataiku/dss` container, by
-contrast, refused with `DSS API is not available with your Free Edition
-license`.
+`license_ssm_parameter` makes that a one-time job: register once, keep the
+licence in Parameter Store, and every instance after that reads it at boot.
+[docs/licensing.md](docs/licensing.md) covers that, the alternative of having
+the instance register itself, and why `license_json` is the weaker option
+despite being simpler. It also says plainly that none of this removes the DSS
+login page, only the registration form.
 
-The check that matters is whether the API answers at all:
+Whether the instance serves the public REST API at all is a separate
+question, and worth checking rather than assuming. A stock DSS 15 Community
+Edition installed by this module answered it with no licence at all, and
+projects, groups, users, connections and scenarios were all created through
+it. An older `dataiku/dss` container refused with `DSS API is not available
+with your Free Edition license`.
 
 ```bash
-curl -su "$DATAIKU_API_KEY:" "$(terraform output -raw dss_url)/public/api/admin/general-settings/" -o /dev/null -w '%{http_code}'; echo
+curl -su "$DATAIKU_API_KEY:" -o /dev/null -w '%{http_code}' \
+  "$(terraform output -raw dss_url)/public/api/admin/general-settings/"; echo
 ```
 
 `200` means the provider will work. `401` is a bad key. A licence error names
 itself in the body, and then you need a licence with API access.
-
-Pass a licence at install time with `license_json` if you have one, or register
-the instance through its web interface on first visit.
-
-`license_json` reaches instance user-data and Terraform state, so supply it from a
-secret store rather than a file in your repository.
 
 ## Security defaults
 
