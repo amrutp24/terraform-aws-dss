@@ -24,14 +24,10 @@ module "dss" {
 
   allowed_cidr_blocks = ["203.0.113.0/24"] # replace: your office or VPN range
 
-  # A shell on the instance without a key pair, and the only way to read the
-  # admin API key the bootstrap writes.
+  # A shell on the instance, and the only way to read the admin API key.
   enable_ssm = true
 
-  # Where the licence lives. The instance reads it at boot, so it is licensed
-  # before DSS finishes starting and nobody has to register it in a browser.
-  # See docs/licensing.md. license_json also works and is simpler, but it
-  # reaches Terraform state and instance metadata.
+  # The instance reads its licence from here at boot. See docs/licensing.md.
   license_ssm_parameter = "/dss/license"
 }
 
@@ -160,23 +156,24 @@ it exists. Destroy it when you are done.
 
 ## Licensing
 
-A fresh instance asks whoever opens it first to register Free Edition, and
-until somebody does it licenses only the `NONE` user profile, which is enough
-to stop the `dataiku` provider creating a usable user.
+A fresh instance asks whoever opens it first to register Free Edition. Until
+somebody does, it licenses only the `NONE` user profile, which is not enough
+for the `dataiku` provider to create a usable user.
 
 `license_ssm_parameter` makes that a one-time job: register once, keep the
 licence in Parameter Store, and every instance after that reads it at boot.
-[docs/licensing.md](docs/licensing.md) covers that, the alternative of having
-the instance register itself, and why `license_json` is the weaker option
-despite being simpler. It also says plainly that none of this removes the DSS
-login page, only the registration form.
+`license_json` works too and is simpler, but it ends up in Terraform state
+and instance metadata. [docs/licensing.md](docs/licensing.md) has both, and
+the third option of letting the instance register itself.
 
-Whether the instance serves the public REST API at all is a separate
-question, and worth checking rather than assuming. A stock DSS 15 Community
-Edition installed by this module answered it with no licence at all, and
-projects, groups, users, connections and scenarios were all created through
-it. An older `dataiku/dss` container refused with `DSS API is not available
-with your Free Edition license`.
+None of them removes the DSS login page. DSS always asks for credentials,
+`admin` / `admin` on a fresh install.
+
+Whether the API answers at all is separate, and worth checking. A stock DSS
+15 Community Edition installed by this module answered it with no licence,
+and projects, groups, users, connections and scenarios were all created
+through it. An older `dataiku/dss` container refused with `DSS API is not
+available with your Free Edition license`.
 
 ```bash
 curl -su "$DATAIKU_API_KEY:" -o /dev/null -w '%{http_code}' \
